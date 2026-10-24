@@ -8,7 +8,8 @@ text \<open>
   Compilation succeeds only across the complete admission boundary:
 
     1. M conforms to MM_Class;
-    2. every OCL invariant in M is well typed/resolvable against M;
+    2. every OCL invariant in M is well typed/resolvable against M and belongs
+       to the published supported_expr profile;
     3. Sigma is a well-formed representation specification for M;
     4. Front resolves the selected invariant;
     5. lower_invariant generates the graph-query AST.
@@ -90,6 +91,11 @@ lemma compile_success_has_boolean_source_body:
   assumes "compile_invariant \<Sigma> M I = Some q"
   shows "infer_type M (inv_context I) [] (inv_body I) = Some OTBool"
   using invariant_wf_boolean compile_success_invariant_wf assms by blast
+
+lemma compile_success_has_supported_source_body:
+  assumes "compile_invariant \<Sigma> M I = Some q"
+  shows "supported_expr M (inv_context I) [] (inv_body I)"
+  using invariant_wf_supported compile_success_invariant_wf assms by blast
 
 
 section \<open>Generated-query correspondence\<close>

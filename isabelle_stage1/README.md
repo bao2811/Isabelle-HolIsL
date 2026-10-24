@@ -75,7 +75,16 @@ association-role navigation resolves uniquely
 operators receive legal operand types
 iterator source is a collection
 iterator body has the required type
+expression satisfies the published supported profile
 ```
+
+`supported_expr M C Gamma e` is the single profile predicate used by the
+compiler claims. It admits mathematical Real values, including mixed
+Integer/Real arithmetic and comparisons. It excludes String ordering, while
+`sum` is admitted only for Set(Integer) and Bag(Integer); the collection
+semantic value does not retain an element type for an empty Real collection.
+Moreover, `isUnique`, `xor`, `reject`, and surface `null`/`invalid` are not
+constructors of the admitted surface AST.
 
 The full model is accepted by:
 
@@ -104,6 +113,7 @@ compile_success_rep_spec_wf
 compile_success_invariant_wf
 compile_rejects_ill_typed_ocl
 compile_success_has_boolean_source_body
+compile_success_has_supported_source_body
 compile_total_on_admitted_invariant
 admitted_model_generates_query_for_each_invariant
 build_graph_conforms
@@ -113,6 +123,9 @@ transformation_correct_pointwise
 build_attr_observation_adequate
 build_nav_observation_adequate
 build_scan_observation_adequate
+build_label_iff_subclass
+build_class_scan_exact
+snapshot_scan_ids_exact
 transformation_correct
 ```
 
@@ -225,7 +238,12 @@ construction preserves attribute lookup, association navigation, and class
 extents. This avoids defining graph evaluation in terms of source evaluation.
 
 `Adequacy.thy` discharges all three assumptions directly from the equations of
-`build Sigma M S`. Its final theorem `transformation_correct` combines:
+`build Sigma M S`. `build_class_scan_exact` additionally proves that scanning
+a generated class label selects exactly the snapshot objects of that class
+or one of its subclasses; its source-side set uses `subclass_of` directly,
+independently of `build_labels`.
+
+Its final theorem `transformation_correct` combines:
 
 - conformance of the generated graph to `MM_Graph`;
 - the bijection `obj_id` from source objects to generated nodes;

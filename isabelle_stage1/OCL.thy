@@ -332,13 +332,131 @@ fun infer_type :: "ocl_model \<Rightarrow> cname \<Rightarrow> type_env \<Righta
       | _ \<Rightarrow> None)"
 
 
+section \<open>Published supported profile\<close>
+
+text \<open>
+  supported_expr is the single profile predicate used for compilation claims.
+  infer_type remains the ordinary model-dependent type checker; this predicate
+  additionally excludes constructors or operand domains for which the current
+  semantic layer is intentionally incomplete (Real sum and String ordering).
+\<close>
+
+definition numeric_operands ::
+  "ocl_model \<Rightarrow> cname \<Rightarrow> type_env \<Rightarrow> ocl_expr \<Rightarrow> ocl_expr \<Rightarrow> bool" where
+  "numeric_operands M C \<Gamma> a b =
+     (case (infer_type M C \<Gamma> a, infer_type M C \<Gamma> b) of
+        (Some ta, Some tb) \<Rightarrow> numeric_result ta tb \<noteq> None
+      | _ \<Rightarrow> False)"
+
+fun supported_expr ::
+  "ocl_model \<Rightarrow> cname \<Rightarrow> type_env \<Rightarrow> ocl_expr \<Rightarrow> bool" where
+  "supported_expr M C \<Gamma> (OBool b) = True"
+| "supported_expr M C \<Gamma> (OInt i) = True"
+| "supported_expr M C \<Gamma> (OReal r) = True"
+| "supported_expr M C \<Gamma> (OString s) = True"
+| "supported_expr M C \<Gamma> OSelf = True"
+| "supported_expr M C \<Gamma> (OVar x) = True"
+| "supported_expr M C \<Gamma> (OLet x e body) =
+     (supported_expr M C \<Gamma> e \<and>
+      (case infer_type M C \<Gamma> e of
+         None \<Rightarrow> False
+       | Some t \<Rightarrow> supported_expr M C ((x,t)#\<Gamma>) body))"
+| "supported_expr M C \<Gamma> (OIf c t e) =
+     (supported_expr M C \<Gamma> c \<and>
+      supported_expr M C \<Gamma> t \<and>
+      supported_expr M C \<Gamma> e)"
+| "supported_expr M C \<Gamma> (OAttr e a) =
+     (supported_expr M C \<Gamma> e \<and>
+      (case infer_type M C \<Gamma> (OAttr e a) of
+         Some OTBool \<Rightarrow> True
+       | Some OTInt \<Rightarrow> True
+       | Some OTReal \<Rightarrow> True
+       | Some OTString \<Rightarrow> True
+       | _ \<Rightarrow> False))"
+| "supported_expr M C \<Gamma> (ONav e r) = supported_expr M C \<Gamma> e"
+| "supported_expr M C \<Gamma> (OAllInstances c) = True"
+| "supported_expr M C \<Gamma> (OUnary op e) =
+     (supported_expr M C \<Gamma> e \<and>
+      (case op of
+         UNot \<Rightarrow> True
+       | UNeg \<Rightarrow> (infer_type M C \<Gamma> e = Some OTInt \<or>
+                   infer_type M C \<Gamma> e = Some OTReal)
+       | UIsUndefined \<Rightarrow> True
+       | USize \<Rightarrow> True
+       | UIsEmpty \<Rightarrow> True
+       | UNotEmpty \<Rightarrow> True
+       | USum \<Rightarrow> (case infer_type M C \<Gamma> e of
+                      Some (OTSet OTInt) \<Rightarrow> True
+                    | Some (OTBag OTInt) \<Rightarrow> True
+                    | _ \<Rightarrow> False)))"
+| "supported_expr M C \<Gamma> (OBinary op a b) =
+     (supported_expr M C \<Gamma> a \<and> supported_expr M C \<Gamma> b \<and>
+      (case op of
+         BLt \<Rightarrow> numeric_operands M C \<Gamma> a b
+       | BLe \<Rightarrow> numeric_operands M C \<Gamma> a b
+       | BGt \<Rightarrow> numeric_operands M C \<Gamma> a b
+       | BGe \<Rightarrow> numeric_operands M C \<Gamma> a b
+       | BAdd \<Rightarrow> numeric_operands M C \<Gamma> a b
+       | BSub \<Rightarrow> numeric_operands M C \<Gamma> a b
+       | BMul \<Rightarrow> numeric_operands M C \<Gamma> a b
+       | _ \<Rightarrow> True))"
+| "supported_expr M C \<Gamma> (OSelect src x body) =
+     (supported_expr M C \<Gamma> src \<and>
+      (case infer_type M C \<Gamma> src of
+         Some (OTSet t) \<Rightarrow> supported_expr M C ((x,t)#\<Gamma>) body
+       | Some (OTBag t) \<Rightarrow> supported_expr M C ((x,t)#\<Gamma>) body
+       | _ \<Rightarrow> False))"
+| "supported_expr M C \<Gamma> (OCollect src x body) =
+     (supported_expr M C \<Gamma> src \<and>
+      (case infer_type M C \<Gamma> src of
+         Some (OTSet t) \<Rightarrow> supported_expr M C ((x,t)#\<Gamma>) body
+       | Some (OTBag t) \<Rightarrow> supported_expr M C ((x,t)#\<Gamma>) body
+       | _ \<Rightarrow> False))"
+| "supported_expr M C \<Gamma> (OForAll src x body) =
+     (supported_expr M C \<Gamma> src \<and>
+      (case infer_type M C \<Gamma> src of
+         Some (OTSet t) \<Rightarrow> supported_expr M C ((x,t)#\<Gamma>) body
+       | Some (OTBag t) \<Rightarrow> supported_expr M C ((x,t)#\<Gamma>) body
+       | _ \<Rightarrow> False))"
+| "supported_expr M C \<Gamma> (OExists src x body) =
+     (supported_expr M C \<Gamma> src \<and>
+      (case infer_type M C \<Gamma> src of
+         Some (OTSet t) \<Rightarrow> supported_expr M C ((x,t)#\<Gamma>) body
+       | Some (OTBag t) \<Rightarrow> supported_expr M C ((x,t)#\<Gamma>) body
+       | _ \<Rightarrow> False))"
+
+lemma supported_sum_integer:
+  assumes "supported_expr M C \<Gamma> e"
+      and "infer_type M C \<Gamma> e = Some (OTSet OTInt) \<or>
+           infer_type M C \<Gamma> e = Some (OTBag OTInt)"
+  shows "supported_expr M C \<Gamma> (OUnary USum e)"
+  using assms by auto
+
+lemma unsupported_sum_real:
+  assumes "infer_type M C \<Gamma> e = Some (OTSet OTReal) \<or>
+           infer_type M C \<Gamma> e = Some (OTBag OTReal)"
+  shows "\<not> supported_expr M C \<Gamma> (OUnary USum e)"
+  using assms by auto
+
+lemma real_comparison_supported:
+  "supported_expr M C \<Gamma> (OBinary BLt (OReal 2) (OReal 3)) \<and>
+   infer_type M C \<Gamma> (OBinary BLt (OReal 2) (OReal 3)) = Some OTBool"
+  by (simp add: numeric_operands_def)
+
+lemma mixed_real_arithmetic_supported:
+  "supported_expr M C \<Gamma> (OBinary BAdd (OInt 2) (OReal 3)) \<and>
+   infer_type M C \<Gamma> (OBinary BAdd (OInt 2) (OReal 3)) = Some OTReal"
+  by (simp add: numeric_operands_def)
+
+
 section \<open>Invariant validity relative to M\<close>
 
 definition invariant_wf :: "ocl_model \<Rightarrow> ocl_invariant \<Rightarrow> bool" where
   "invariant_wf M I \<longleftrightarrow>
      I \<in> model_invariants M \<and>
      inv_context I \<in> class_names M \<and>
-     infer_type M (inv_context I) [] (inv_body I) = Some OTBool"
+     infer_type M (inv_context I) [] (inv_body I) = Some OTBool \<and>
+     supported_expr M (inv_context I) [] (inv_body I)"
 
 text \<open>
   This is the full source-side admission predicate required before compilation.
@@ -362,6 +480,11 @@ lemma invariant_wf_context_declared:
 lemma invariant_wf_boolean:
   assumes "invariant_wf M I"
   shows "infer_type M (inv_context I) [] (inv_body I) = Some OTBool"
+  using assms unfolding invariant_wf_def by blast
+
+lemma invariant_wf_supported:
+  assumes "invariant_wf M I"
+  shows "supported_expr M (inv_context I) [] (inv_body I)"
   using assms unfolding invariant_wf_def by blast
 
 lemma ocl_model_conforms_model:

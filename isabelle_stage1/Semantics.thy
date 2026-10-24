@@ -19,6 +19,13 @@ fun sem_lookup :: "sem_env \<Rightarrow> vname \<Rightarrow> sem_value" where
   "sem_lookup [] x = SUndefined"
 | "sem_lookup ((y,v)#\<rho>) x = (if x = y then v else sem_lookup \<rho> x)"
 
+fun sum_int_values :: "sem_value list \<Rightarrow> int option" where
+  "sum_int_values [] = Some 0"
+| "sum_int_values (x#xs) =
+     (case x of
+        SInt i \<Rightarrow> (case sum_int_values xs of Some n \<Rightarrow> Some (i + n) | None \<Rightarrow> None)
+      | _ \<Rightarrow> None)"
+
 primrec sem_unary :: "ocl_unop \<Rightarrow> sem_value \<Rightarrow> sem_value" where
   "sem_unary UNot v = (case v of SBool b \<Rightarrow> SBool (\<not> b) | _ \<Rightarrow> SUndefined)"
 | "sem_unary UNeg v =
@@ -31,42 +38,144 @@ primrec sem_unary :: "ocl_unop \<Rightarrow> sem_value \<Rightarrow> sem_value" 
      (case v of SCollection xs \<Rightarrow> SBool (xs = []) | _ \<Rightarrow> SUndefined)"
 | "sem_unary UNotEmpty v =
      (case v of SCollection xs \<Rightarrow> SBool (xs \<noteq> []) | _ \<Rightarrow> SUndefined)"
-| "sem_unary USum v = SUndefined"
+| "sem_unary USum v =
+     (case v of
+        SCollection xs \<Rightarrow>
+          (case sum_int_values xs of Some n \<Rightarrow> SInt n | None \<Rightarrow> SUndefined)
+      | _ \<Rightarrow> SUndefined)"
+
+lemma sum_empty: "sem_unary USum (SCollection []) = SInt 0"
+  by simp
+
+lemma sum_bag_duplicates:
+  "sem_unary USum (SCollection [SInt 2, SInt 2, SInt 3]) = SInt 7"
+  by simp
+
+lemma sum_undefined_element:
+  "sem_unary USum (SCollection [SInt 2, SUndefined]) = SUndefined"
+  by simp
+
+fun sem_as_real :: "sem_value \<Rightarrow> real option" where
+  "sem_as_real (SInt i) = Some (of_int i)"
+| "sem_as_real (SReal r) = Some r"
+| "sem_as_real _ = None"
+
+definition sem_num_compare ::
+  "(real \<Rightarrow> real \<Rightarrow> bool) \<Rightarrow> sem_value \<Rightarrow> sem_value \<Rightarrow> sem_value" where
+  "sem_num_compare f a b =
+     (case (sem_as_real a, sem_as_real b) of
+        (Some x, Some y) \<Rightarrow> SBool (f x y)
+      | _ \<Rightarrow> SUndefined)"
+
+definition sem_num_arith ::
+  "(int \<Rightarrow> int \<Rightarrow> int) \<Rightarrow>
+   (real \<Rightarrow> real \<Rightarrow> real) \<Rightarrow>
+   sem_value \<Rightarrow> sem_value \<Rightarrow> sem_value" where
+  "sem_num_arith fi fr a b =
+     (case (a,b) of
+        (SInt x, SInt y) \<Rightarrow> SInt (fi x y)
+      | _ \<Rightarrow> (case (sem_as_real a, sem_as_real b) of
+                 (Some x, Some y) \<Rightarrow> SReal (fr x y)
+               | _ \<Rightarrow> SUndefined))"
+
+text \<open>
+  Boolean connectives use three-valued dominance: False dominates conjunction,
+  True dominates disjunction, and a False antecedent or True consequent makes
+  implication True.  Equality follows USE's total equality on the single
+  internal undefined value: undefined equals itself, but no defined value.
+\<close>
 
 primrec sem_binary :: "ocl_binop \<Rightarrow> sem_value \<Rightarrow> sem_value \<Rightarrow> sem_value" where
   "sem_binary BAnd a b =
-     (case (a,b) of (SBool x,SBool y) \<Rightarrow> SBool (x \<and> y) | _ \<Rightarrow> SUndefined)"
+     (case (a,b) of
+        (SBool False, _) \<Rightarrow> SBool False
+      | (_, SBool False) \<Rightarrow> SBool False
+      | (SBool True, SBool True) \<Rightarrow> SBool True
+      | _ \<Rightarrow> SUndefined)"
 | "sem_binary BOr a b =
-     (case (a,b) of (SBool x,SBool y) \<Rightarrow> SBool (x \<or> y) | _ \<Rightarrow> SUndefined)"
+     (case (a,b) of
+        (SBool True, _) \<Rightarrow> SBool True
+      | (_, SBool True) \<Rightarrow> SBool True
+      | (SBool False, SBool False) \<Rightarrow> SBool False
+      | _ \<Rightarrow> SUndefined)"
 | "sem_binary BImplies a b =
-     (case (a,b) of (SBool x,SBool y) \<Rightarrow> SBool (x \<longrightarrow> y) | _ \<Rightarrow> SUndefined)"
-| "sem_binary BEq a b = SBool (a = b)"
-| "sem_binary BNeq a b = SBool (a \<noteq> b)"
+     (case (a,b) of
+        (SBool False, _) \<Rightarrow> SBool True
+      | (_, SBool True) \<Rightarrow> SBool True
+      | (SBool True, SBool False) \<Rightarrow> SBool False
+      | _ \<Rightarrow> SUndefined)"
+| "sem_binary BEq a b =
+     (case (a,b) of
+        (SUndefined, SUndefined) \<Rightarrow> SBool True
+      | (SUndefined, _) \<Rightarrow> SBool False
+      | (_, SUndefined) \<Rightarrow> SBool False
+      | (SInt x, SReal y) \<Rightarrow> SBool (of_int x = y)
+      | (SReal x, SInt y) \<Rightarrow> SBool (x = of_int y)
+      | _ \<Rightarrow> SBool (a = b))"
+| "sem_binary BNeq a b =
+     (case (a,b) of
+        (SUndefined, SUndefined) \<Rightarrow> SBool False
+      | (SUndefined, _) \<Rightarrow> SBool True
+      | (_, SUndefined) \<Rightarrow> SBool True
+      | (SInt x, SReal y) \<Rightarrow> SBool (of_int x \<noteq> y)
+      | (SReal x, SInt y) \<Rightarrow> SBool (x \<noteq> of_int y)
+      | _ \<Rightarrow> SBool (a \<noteq> b))"
 | "sem_binary BLt a b =
-     (case (a,b) of (SInt x,SInt y) \<Rightarrow> SBool (x < y) | _ \<Rightarrow> SUndefined)"
+     sem_num_compare (\<lambda>x y. x < y) a b"
 | "sem_binary BLe a b =
-     (case (a,b) of (SInt x,SInt y) \<Rightarrow> SBool (x \<le> y) | _ \<Rightarrow> SUndefined)"
+     sem_num_compare (\<lambda>x y. x \<le> y) a b"
 | "sem_binary BGt a b =
-     (case (a,b) of (SInt x,SInt y) \<Rightarrow> SBool (x > y) | _ \<Rightarrow> SUndefined)"
+     sem_num_compare (\<lambda>x y. x > y) a b"
 | "sem_binary BGe a b =
-     (case (a,b) of (SInt x,SInt y) \<Rightarrow> SBool (x \<ge> y) | _ \<Rightarrow> SUndefined)"
+     sem_num_compare (\<lambda>x y. x \<ge> y) a b"
 | "sem_binary BAdd a b =
-     (case (a,b) of (SInt x,SInt y) \<Rightarrow> SInt (x + y) | _ \<Rightarrow> SUndefined)"
+     sem_num_arith (\<lambda>x y. x + y) (\<lambda>x y. x + y) a b"
 | "sem_binary BSub a b =
-     (case (a,b) of (SInt x,SInt y) \<Rightarrow> SInt (x - y) | _ \<Rightarrow> SUndefined)"
+     sem_num_arith (\<lambda>x y. x - y) (\<lambda>x y. x - y) a b"
 | "sem_binary BMul a b =
-     (case (a,b) of (SInt x,SInt y) \<Rightarrow> SInt (x * y) | _ \<Rightarrow> SUndefined)"
+     sem_num_arith (\<lambda>x y. x * y) (\<lambda>x y. x * y) a b"
+
+lemma real_arithmetic:
+  "sem_binary BAdd (SReal 2) (SReal 3) = SReal 5"
+  by (simp add: sem_num_arith_def)
+
+lemma mixed_arithmetic:
+  "sem_binary BMul (SInt 2) (SReal 3) = SReal 6"
+  by (simp add: sem_num_arith_def)
+
+lemma mixed_numeric_equality:
+  "sem_binary BEq (SInt 2) (SReal 2) = SBool True"
+  by simp
+
+lemma undefined_equality:
+  "sem_binary BEq SUndefined SUndefined = SBool True"
+  "sem_binary BEq SUndefined (SInt n) = SBool False"
+  "sem_binary BEq (SInt n) SUndefined = SBool False"
+  "sem_binary BNeq SUndefined SUndefined = SBool False"
+  "sem_binary BNeq SUndefined (SInt n) = SBool True"
+  "sem_binary BNeq (SInt n) SUndefined = SBool True"
+  by simp_all
+
+lemma mixed_numeric_order:
+  "sem_binary BLt (SInt 2) (SReal 3) = SBool True"
+  by (simp add: sem_num_compare_def)
 
 fun sem_select :: "sem_value list \<Rightarrow> (sem_value \<Rightarrow> sem_value) \<Rightarrow> sem_value list" where
   "sem_select [] f = []"
 | "sem_select (x#xs) f =
      (if f x = SBool True then x # sem_select xs f else sem_select xs f)"
 
+text \<open>
+  Quantified folds are order independent with respect to undefined predicate
+  results: a decisive False for forAll or True for exists dominates undefined.
+\<close>
+
 fun sem_forall :: "sem_value list \<Rightarrow> (sem_value \<Rightarrow> sem_value) \<Rightarrow> sem_value" where
   "sem_forall [] f = SBool True"
 | "sem_forall (x#xs) f =
      (if f x = SBool True then sem_forall xs f
       else if f x = SBool False then SBool False
+      else if sem_forall xs f = SBool False then SBool False
       else SUndefined)"
 
 fun sem_exists :: "sem_value list \<Rightarrow> (sem_value \<Rightarrow> sem_value) \<Rightarrow> sem_value" where
@@ -74,6 +183,7 @@ fun sem_exists :: "sem_value list \<Rightarrow> (sem_value \<Rightarrow> sem_val
 | "sem_exists (x#xs) f =
      (if f x = SBool True then SBool True
       else if f x = SBool False then sem_exists xs f
+      else if sem_exists xs f = SBool True then SBool True
       else SUndefined)"
 
 section \<open>Independent Core and graph-query evaluators\<close>

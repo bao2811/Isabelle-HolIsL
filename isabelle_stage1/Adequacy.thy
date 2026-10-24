@@ -1,4 +1,4 @@
- ddamr theory Adequacy
+theory Adequacy
   imports Semantics
 begin
 
@@ -32,6 +32,12 @@ definition snapshot_scan_ids ::
 definition graph_scan_ids ::
   "('n, 'e) property_graph \<Rightarrow> graph_label \<Rightarrow> 'n set" where
   "graph_scan_ids G l = {i \<in> pg_nodes G. l \<in> pg_node_labels G i}"
+
+definition snapshot_instance_ids ::
+  "'e class_model \<Rightarrow> snapshot \<Rightarrow> cname \<Rightarrow> oid set" where
+  "snapshot_instance_ids M S c =
+     {i \<in> object_ids S.
+        subclass_of M (obj_class (object_of_id S i)) c}"
 
 definition ids_as_values :: "oid set \<Rightarrow> sem_value list" where
   "ids_as_values A = map SObject (SOME xs. set xs = A)"
@@ -90,6 +96,37 @@ definition graph_nav_observation ::
   "graph_nav_observation G i n = ids_as_values (graph_nav_ids G i n)"
 
 section \<open>The generated graph discharges the semantic boundary\<close>
+
+lemma build_label_iff_subclass:
+  assumes REP: "rep_spec_wf \<Sigma> M"
+      and CLASS: "c \<in> class_names M"
+      and OBJECT: "i \<in> object_ids S"
+  shows "sigma_class_label \<Sigma> c \<in> pg_node_labels (build \<Sigma> M S) i
+         \<longleftrightarrow> subclass_of M (obj_class (object_of_id S i)) c"
+proof -
+  have INJ: "inj_on (sigma_class_label \<Sigma>) (class_names M)"
+    using REP unfolding rep_spec_wf_def by simp
+  show ?thesis
+    using INJ CLASS OBJECT
+    by (auto simp: build_labels_def dest: inj_onD)
+qed
+
+lemma build_class_scan_exact:
+  assumes REP: "rep_spec_wf \<Sigma> M"
+      and CLASS: "c \<in> class_names M"
+  shows "graph_scan_ids (build \<Sigma> M S) (sigma_class_label \<Sigma> c) =
+         snapshot_instance_ids M S c"
+  using build_label_iff_subclass[OF REP CLASS]
+  unfolding graph_scan_ids_def snapshot_instance_ids_def
+  by auto
+
+lemma snapshot_scan_ids_exact:
+  assumes REP: "rep_spec_wf \<Sigma> M"
+      and CLASS: "c \<in> class_names M"
+  shows "snapshot_scan_ids \<Sigma> M S c = snapshot_instance_ids M S c"
+  using build_label_iff_subclass[OF REP CLASS]
+  unfolding snapshot_scan_ids_def snapshot_instance_ids_def
+  by auto
 
 lemma build_attr_observation_adequate:
   "graph_attr_observation (build \<Sigma> M S) i (sigma_attr_key \<Sigma> ak) =

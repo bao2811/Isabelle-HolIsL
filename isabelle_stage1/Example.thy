@@ -171,7 +171,7 @@ lemma example_invariant_well_typed:
   by (simp add: invariant_wf_def manager_salary_dominates_def
       navigation_resolves_def resolved_navigation_def attribute_resolves_def
       resolved_attribute_def employee_association_def manager_association_def
-      salary_attribute_def)
+      salary_attribute_def numeric_operands_def)
 
 lemma example_model_admissible:
   "ocl_model_conforms example_model"
@@ -191,8 +191,43 @@ lemma example_builder_supported:
   by (simp add: builder_supported_model_def primitive_scalar_attribute_def
       example_model_def salary_attribute_def)
 
+lemma example_management_left_links:
+  "{l\<in>snap_links example_snapshot.
+      link_assoc l = ''management'' \<and> link_left l = ''oneBranch''} = {manager_alice}"
+  by (auto simp: example_snapshot_def employee_alice_def employee_bob_def
+      manager_alice_def)
+
+lemma example_management_alice_links:
+  "{l\<in>snap_links example_snapshot.
+      link_assoc l = ''management'' \<and> link_right l = ''Alice''} = {manager_alice}"
+  by (auto simp: example_snapshot_def employee_alice_def employee_bob_def
+      manager_alice_def)
+
+lemma example_management_bob_links:
+  "{l\<in>snap_links example_snapshot.
+      link_assoc l = ''management'' \<and> link_right l = ''Bob''} = {}"
+  by (auto simp: example_snapshot_def employee_alice_def employee_bob_def
+      manager_alice_def)
+
+lemma example_management_counts:
+  "count_right_targets example_snapshot manager_association ''oneBranch'' = 1"
+  "count_left_sources example_snapshot manager_association ''Alice'' = 1"
+  "count_left_sources example_snapshot manager_association ''Bob'' = 0"
+  by (simp_all add: count_right_targets_def count_left_sources_def
+      manager_association_def example_management_left_links
+      example_management_alice_links example_management_bob_links)
+
+lemma example_association_multiplicities:
+  "association_multiplicities_hold example_model example_snapshot"
+  using example_management_counts
+  by (auto simp: association_multiplicities_hold_def example_model_def
+      example_snapshot_def branch_object_def alice_object_def bob_object_def
+      employee_association_def manager_association_def subclass_of_def
+      parent_rel_def multiplicity_holds_def)
+
 lemma example_snapshot_conforms:
   "snapshot_conforms example_model example_snapshot"
+  using example_association_multiplicities
   by (auto simp add: snapshot_conforms_def example_model_def example_snapshot_def
       branch_class_def employee_class_def salary_attribute_def
       employee_association_def manager_association_def
@@ -202,8 +237,7 @@ lemma example_snapshot_conforms:
       unique_by_def is_abstract_class_def subclass_of_def parent_rel_def
       slot_key_of_def slot_wf_def all_required_slots_present_def
       applicable_attribute_def multiplicity_holds_def link_wf_def
-      association_multiplicities_hold_def count_right_targets_def
-      count_left_sources_def)
+      association_multiplicities_hold_def)
 
 lemma example_build_admissible:
   "build_admissible example_sigma example_model example_snapshot"
